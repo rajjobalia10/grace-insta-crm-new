@@ -3,17 +3,22 @@ import {
   Activity,
   BarChart3,
   Bolt,
+  Bot,
+  BrainCircuit,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
   CircleDot,
   ClipboardList,
+  Crosshair,
   Download,
+  Eye,
   Filter,
   Flame,
   Globe2,
   Inbox,
   Instagram,
+  LayoutDashboard,
   Linkedin,
   Mail,
   MessageSquareText,
@@ -26,7 +31,9 @@ import {
   Sparkles,
   Square,
   Upload,
+  UserRoundCheck,
   Users,
+  Workflow,
   Zap
 } from "lucide-react";
 import {
@@ -50,7 +57,23 @@ import type {
   Task
 } from "./types";
 
-type ViewKey = "analytics" | "leads" | "inbox" | "campaigns" | "channels" | "tasks";
+type ViewKey =
+  | "copilot"
+  | "agents"
+  | "leads"
+  | "channels"
+  | "campaigns"
+  | "inbox"
+  | "analytics"
+  | "crm"
+  | "visitors"
+  | "placement"
+  | "automations"
+  | "tasks";
+
+type TopChannel = "all" | "instagram" | "linkedin" | "email";
+type InboxTab = "primary" | "others";
+type AnalyticsMode = "campaign" | "account";
 
 const statusLabels: Record<LeadStatus, string> = {
   missing: "Missing",
@@ -91,7 +114,11 @@ const emptyLead: NewLeadInput = {
 
 function App() {
   const [data, setData] = useState<CrmData | null>(null);
-  const [activeView, setActiveView] = useState<ViewKey>("analytics");
+  const [activeView, setActiveView] = useState<ViewKey>("inbox");
+  const [topChannel, setTopChannel] = useState<TopChannel>("all");
+  const [inboxTab, setInboxTab] = useState<InboxTab>("primary");
+  const [analyticsMode, setAnalyticsMode] = useState<AnalyticsMode>("campaign");
+  const [analyticsRange, setAnalyticsRange] = useState("Last 4 weeks");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
   const [channelFilter, setChannelFilter] = useState<ChannelType | "all">("all");
@@ -144,9 +171,19 @@ function App() {
       const matchesStatus = statusFilter === "all" || lead.status === statusFilter;
       const leadOutreach = outreachByLead.get(lead.id) ?? [];
       const matchesChannel = channelFilter === "all" || leadOutreach.some((event) => event.channel === channelFilter);
-      return matchesQuery && matchesStatus && matchesChannel;
+      const matchesTopChannel =
+        topChannel === "all" ||
+        (topChannel === "instagram" && Boolean(lead.instagramHandle || leadOutreach.some((event) => event.channel === "instagram"))) ||
+        (topChannel === "linkedin" && Boolean(lead.linkedinUrl || leadOutreach.some((event) => event.channel === "linkedin"))) ||
+        (topChannel === "email" && Boolean(lead.email || leadOutreach.some((event) => event.channel === "email")));
+      const matchesInboxTab =
+        activeView !== "inbox" ||
+        inboxTab === "primary" ||
+        ["won", "lost"].includes(lead.status) ||
+        leadOutreach.some((event) => event.repliedAt || event.direction === "inbound");
+      return matchesQuery && matchesStatus && matchesChannel && matchesTopChannel && matchesInboxTab;
     });
-  }, [activeLeads, channelFilter, outreachByLead, query, statusFilter]);
+  }, [activeLeads, activeView, channelFilter, inboxTab, outreachByLead, query, statusFilter, topChannel]);
 
   async function handleCreateLead(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -199,6 +236,18 @@ function App() {
     setNotice(task.status === "done" ? "Task reopened." : "Task completed.");
   }
 
+  function handleStartNewLeadFlow() {
+    setActiveView("leads");
+    setQuery("");
+    setStatusFilter("all");
+    setNotice("Lead intake opened. Add manually or import CSV.");
+  }
+
+  function handleShareReport() {
+    exportText("grace-insta-crm-report.json", JSON.stringify({ analytics: data?.analytics, leads: activeLeads }, null, 2), "application/json");
+    setNotice("Analytics report exported.");
+  }
+
   if (!data) {
     return (
       <div className="boot-screen">
@@ -220,10 +269,28 @@ function App() {
         tasks={data.tasks}
         campaigns={data.campaigns}
         channels={data.channels}
+        onStatusFilter={(status) => {
+          setStatusFilter(status);
+          setActiveView("inbox");
+        }}
+        onOpenView={setActiveView}
       />
       <main className="workspace">
-        <Topbar notice={notice} loading={loading} onExportCsv={() => exportText("grace-insta-crm-leads.csv", leadsToCsv(activeLeads), "text/csv")} />
+        <Topbar
+          notice={notice}
+          loading={loading}
+          topChannel={topChannel}
+          onTopChannel={setTopChannel}
+          onExportCsv={() => exportText("grace-insta-crm-leads.csv", leadsToCsv(activeLeads), "text/csv")}
+          onGetLeads={handleStartNewLeadFlow}
+        />
         <div className="workspace-body">
+          {activeView === "copilot" && (
+            <CopilotScreen analytics={data.analytics} leads={activeLeads} tasks={data.tasks} onOpenTasks={() => setActiveView("tasks")} />
+          )}
+          {activeView === "agents" && (
+            <AgentsScreen leads={activeLeads} onRunAgent={() => setNotice("AI agent draft queued for selected lead list.")} />
+          )}
           {activeView === "analytics" && (
             <AnalyticsScreen
               analytics={data.analytics}
@@ -231,6 +298,11 @@ function App() {
               channels={data.channels}
               leads={activeLeads}
               outreachByLead={outreachByLead}
+              mode={analyticsMode}
+              range={analyticsRange}
+              onMode={setAnalyticsMode}
+              onRange={() => setAnalyticsRange((current) => (current === "Last 4 weeks" ? "This week" : "Last 4 weeks"))}
+              onShare={handleShareReport}
             />
           )}
           {activeView === "leads" && (
@@ -267,8 +339,10 @@ function App() {
               outreachByLead={outreachByLead}
               statusFilter={statusFilter}
               query={query}
+              inboxTab={inboxTab}
               onQuery={setQuery}
               onStatusFilter={setStatusFilter}
+              onInboxTab={setInboxTab}
               onSelectLead={setSelectedLeadId}
               onStatusChange={handleStatusChange}
               onLogOutreach={handleLogOutreach}
@@ -283,10 +357,30 @@ function App() {
                 setQuery(campaign.niche);
                 setActiveView("leads");
               }}
+              onNewList={handleStartNewLeadFlow}
             />
           )}
           {activeView === "channels" && (
-            <ChannelsScreen channels={data.channels} outreachEvents={data.outreachEvents} />
+            <ChannelsScreen
+              channels={data.channels}
+              outreachEvents={data.outreachEvents}
+              onAddChannel={() => setNotice("Channel setup is manual for v1. Add accounts in the local data file or duplicate an existing channel.")}
+            />
+          )}
+          {activeView === "crm" && (
+            <CrmPipelineScreen leads={activeLeads} onOpenLead={(leadId) => {
+              setSelectedLeadId(leadId);
+              setActiveView("inbox");
+            }} />
+          )}
+          {activeView === "visitors" && (
+            <WebsiteVisitorsScreen leads={activeLeads} onConvert={handleStartNewLeadFlow} />
+          )}
+          {activeView === "placement" && (
+            <InboxPlacementScreen channels={data.channels} onRunTest={() => setNotice("Inbox placement test added to the local QA queue.")} />
+          )}
+          {activeView === "automations" && (
+            <AutomationsScreen campaigns={data.campaigns} onCreateFlow={() => setNotice("Manual automation checklist created for the active campaign.")} />
           )}
           {activeView === "tasks" && (
             <TasksScreen
@@ -307,11 +401,17 @@ function App() {
 
 function IconRail({ activeView, onChange }: { activeView: ViewKey; onChange: (view: ViewKey) => void }) {
   const nav: Array<{ key: ViewKey; label: string; icon: ReactNode; badge?: string }> = [
-    { key: "analytics", label: "Analytics", icon: <BarChart3 size={20} /> },
-    { key: "leads", label: "Leads", icon: <Search size={20} /> },
-    { key: "inbox", label: "CRM Inbox", icon: <Inbox size={20} />, badge: "2" },
+    { key: "copilot", label: "Instantly Copilot", icon: <Sparkles size={20} /> },
+    { key: "agents", label: "AI Agents", icon: <BrainCircuit size={20} /> },
+    { key: "leads", label: "SuperSearch", icon: <Search size={20} /> },
+    { key: "channels", label: "Email Accounts", icon: <Mail size={20} /> },
     { key: "campaigns", label: "Campaigns", icon: <Send size={20} /> },
-    { key: "channels", label: "Channels", icon: <Activity size={20} /> },
+    { key: "inbox", label: "Unibox", icon: <Inbox size={20} />, badge: "2" },
+    { key: "analytics", label: "Analytics", icon: <BarChart3 size={20} /> },
+    { key: "crm", label: "CRM", icon: <Bolt size={20} />, badge: "2" },
+    { key: "visitors", label: "Website Visitors", icon: <Eye size={20} /> },
+    { key: "placement", label: "Inbox Placement", icon: <LayoutDashboard size={20} /> },
+    { key: "automations", label: "Automations", icon: <Workflow size={20} /> },
     { key: "tasks", label: "Tasks", icon: <ClipboardList size={20} />, badge: "4" }
   ];
 
@@ -347,7 +447,9 @@ function SectionSidebar({
   leads,
   tasks,
   campaigns,
-  channels
+  channels,
+  onStatusFilter,
+  onOpenView
 }: {
   activeView: ViewKey;
   analytics: Analytics;
@@ -355,6 +457,8 @@ function SectionSidebar({
   tasks: Task[];
   campaigns: Campaign[];
   channels: ChannelAccount[];
+  onStatusFilter: (status: LeadStatus | "all") => void;
+  onOpenView: (view: ViewKey) => void;
 }) {
   const sidebar = sidebarConfig(activeView, analytics, leads, tasks, campaigns, channels);
   return (
@@ -370,11 +474,18 @@ function SectionSidebar({
           <div className="sidebar-group" key={group.title}>
             {group.title && <h2>{group.title}</h2>}
             {group.items.map((item) => (
-              <div className={`sidebar-item ${item.active ? "active" : ""}`} key={item.label}>
+              <button
+                className={`sidebar-item ${item.active ? "active" : ""}`}
+                key={item.label}
+                onClick={() => {
+                  if (item.status) onStatusFilter(item.status);
+                  if (item.view) onOpenView(item.view);
+                }}
+              >
                 <span className={`dot dot-${item.tone || "blue"}`} />
                 <span>{item.label}</span>
                 {typeof item.count === "number" && <strong>{item.count}</strong>}
-              </div>
+              </button>
             ))}
           </div>
         ))}
@@ -383,14 +494,40 @@ function SectionSidebar({
   );
 }
 
-function Topbar({ notice, loading, onExportCsv }: { notice: string; loading: boolean; onExportCsv: () => void }) {
+function Topbar({
+  notice,
+  loading,
+  topChannel,
+  onTopChannel,
+  onExportCsv,
+  onGetLeads
+}: {
+  notice: string;
+  loading: boolean;
+  topChannel: TopChannel;
+  onTopChannel: (channel: TopChannel) => void;
+  onExportCsv: () => void;
+  onGetLeads: () => void;
+}) {
+  const tabs: Array<{ key: TopChannel; label: string }> = [
+    { key: "all", label: "Everything" },
+    { key: "instagram", label: "Instagram" },
+    { key: "linkedin", label: "LinkedIn" },
+    { key: "email", label: "Email" }
+  ];
   return (
     <header className="topbar">
       <div className="topbar-tabs">
-        <button className="top-tab active">Everything</button>
-        <button className="top-tab">Instagram</button>
-        <button className="top-tab">LinkedIn</button>
-        <button className="top-tab">Email</button>
+        {tabs.map((tab) => (
+          <button
+            className={`top-tab ${topChannel === tab.key ? "active" : ""}`}
+            key={tab.key}
+            type="button"
+            onClick={() => onTopChannel(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
       <div className="topbar-actions">
         <div className="credit-chip">
@@ -405,7 +542,11 @@ function Topbar({ notice, loading, onExportCsv }: { notice: string; loading: boo
           <Download size={16} />
           Export CSV
         </button>
-        <button className="org-button">
+        <button className="primary-button" type="button" onClick={onGetLeads}>
+          <Plus size={16} />
+          Get Leads
+        </button>
+        <button className="org-button" type="button" onClick={onGetLeads}>
           Grace Insta CRM
           <ChevronDown size={16} />
         </button>
@@ -419,13 +560,23 @@ function AnalyticsScreen({
   campaigns,
   channels: channelAccounts,
   leads,
-  outreachByLead
+  outreachByLead,
+  mode,
+  range,
+  onMode,
+  onRange,
+  onShare
 }: {
   analytics: Analytics;
   campaigns: Campaign[];
   channels: ChannelAccount[];
   leads: Lead[];
   outreachByLead: Map<string, OutreachEvent[]>;
+  mode: AnalyticsMode;
+  range: string;
+  onMode: (mode: AnalyticsMode) => void;
+  onRange: () => void;
+  onShare: () => void;
 }) {
   const accountRows = channelAccounts.map((channel) => ({
     account: channel.account,
@@ -437,17 +588,17 @@ function AnalyticsScreen({
   return (
     <section className="screen screen-analytics">
       <div className="screen-toolbar align-end">
-        <button className="ghost-button">
+        <button className="ghost-button" type="button" onClick={onShare}>
           <Send size={15} />
           Share
         </button>
-        <button className="ghost-button">
+        <button className="ghost-button" type="button" onClick={() => onMode(mode === "campaign" ? "account" : "campaign")}>
           <Filter size={15} />
-          Filter
+          {mode === "campaign" ? "Campaign view" : "Account view"}
           <ChevronDown size={15} />
         </button>
-        <button className="ghost-button">
-          Last 4 weeks
+        <button className="ghost-button" type="button" onClick={onRange}>
+          {range}
           <ChevronDown size={15} />
         </button>
       </div>
@@ -463,18 +614,18 @@ function AnalyticsScreen({
       </div>
 
       <div className="split-tabs">
-        <button className="tab-option active">
+        <button className={`tab-option ${mode === "campaign" ? "active" : ""}`} type="button" onClick={() => onMode("campaign")}>
           <BarChart3 size={18} />
           Campaign Analytics
         </button>
-        <button className="tab-option">
+        <button className={`tab-option ${mode === "account" ? "active" : ""}`} type="button" onClick={() => onMode("account")}>
           <Activity size={18} />
           Account Analytics
         </button>
       </div>
 
       <div className="analytics-lower">
-        <Panel title="Campaign analytics">
+        {mode === "campaign" && <Panel title="Campaign analytics">
           <div className="data-table compact">
             <div className="table-row table-head">
               <span>Campaign</span>
@@ -509,7 +660,7 @@ function AnalyticsScreen({
               );
             })}
           </div>
-        </Panel>
+        </Panel>}
         <Panel title="Account performance">
           <div className="data-table compact">
             <div className="table-row table-head">
@@ -651,8 +802,10 @@ function InboxScreen({
   outreachByLead,
   statusFilter,
   query,
+  inboxTab,
   onQuery,
   onStatusFilter,
+  onInboxTab,
   onSelectLead,
   onStatusChange,
   onLogOutreach
@@ -663,8 +816,10 @@ function InboxScreen({
   outreachByLead: Map<string, OutreachEvent[]>;
   statusFilter: LeadStatus | "all";
   query: string;
+  inboxTab: InboxTab;
   onQuery: (value: string) => void;
   onStatusFilter: (value: LeadStatus | "all") => void;
+  onInboxTab: (tab: InboxTab) => void;
   onSelectLead: (leadId: string) => void;
   onStatusChange: (leadId: string, status: LeadStatus) => void;
   onLogOutreach: (leadId: string, channel?: ChannelType) => void;
@@ -675,8 +830,12 @@ function InboxScreen({
       <div className="inbox-grid">
         <div className="conversation-list">
           <div className="inbox-tabs">
-            <button className="active">Primary</button>
-            <button>Others</button>
+            <button className={inboxTab === "primary" ? "active" : ""} type="button" onClick={() => onInboxTab("primary")}>
+              Primary
+            </button>
+            <button className={inboxTab === "others" ? "active" : ""} type="button" onClick={() => onInboxTab("others")}>
+              Others
+            </button>
           </div>
           <SearchBox value={query} onChange={onQuery} placeholder="Search lead inbox" />
           <div className="inbox-filter-line">
@@ -791,17 +950,19 @@ function CampaignsScreen({
   campaigns,
   leads,
   outreachByLead,
-  onOpenList
+  onOpenList,
+  onNewList
 }: {
   campaigns: Campaign[];
   leads: Lead[];
   outreachByLead: Map<string, OutreachEvent[]>;
   onOpenList: (campaign: Campaign) => void;
+  onNewList: () => void;
 }) {
   return (
     <section className="screen">
       <div className="screen-toolbar align-end">
-        <button className="primary-button">
+        <button className="primary-button" type="button" onClick={onNewList}>
           <Plus size={16} />
           New list
         </button>
@@ -842,20 +1003,22 @@ function CampaignsScreen({
 
 function ChannelsScreen({
   channels: channelAccounts,
-  outreachEvents
+  outreachEvents,
+  onAddChannel
 }: {
   channels: ChannelAccount[];
   outreachEvents: OutreachEvent[];
+  onAddChannel: () => void;
 }) {
   return (
     <section className="screen">
       <div className="screen-toolbar align-end">
-        <button className="ghost-button">
+        <button className="ghost-button" type="button">
           <Bolt size={16} />
           All statuses
           <ChevronDown size={16} />
         </button>
-        <button className="primary-button">
+        <button className="primary-button" type="button" onClick={onAddChannel}>
           <Plus size={16} />
           Add channel
         </button>
@@ -942,6 +1105,218 @@ function TasksScreen({
               </div>
             );
           })}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function CopilotScreen({
+  analytics,
+  leads,
+  tasks,
+  onOpenTasks
+}: {
+  analytics: Analytics;
+  leads: Lead[];
+  tasks: Task[];
+  onOpenTasks: () => void;
+}) {
+  const warmLead = leads.find((lead) => ["interested", "meeting_booked"].includes(lead.status));
+  return (
+    <section className="screen">
+      <div className="copilot-hero">
+        <Sparkles size={26} />
+        <div>
+          <p className="eyeline">Instantly Copilot style workspace</p>
+          <h2>Memory for Grace’s outreach process</h2>
+          <p>
+            Pitch: $1,500 setup plus $129/month for hosting, maintenance, domains, and chatbot support.
+          </p>
+        </div>
+      </div>
+      <div className="campaign-grid">
+        <Panel title="Read my website">
+          <div className="copilot-card">
+            <Globe2 size={28} />
+            <strong>Website teardown memory</strong>
+            <p>Use notes from each lead to shape the next Instagram or LinkedIn follow-up.</p>
+          </div>
+        </Panel>
+        <Panel title="Read a PDF or text file">
+          <div className="copilot-card">
+            <ClipboardList size={28} />
+            <strong>Offer and objection notes</strong>
+            <p>Keep the agency package, pricing, and follow-up scripts visible for the next agent.</p>
+          </div>
+        </Panel>
+      </div>
+      <Panel title="Recommended next move" action={`${analytics.followUpsDue} open`}>
+        <div className="task-row">
+          <button className="check-button" type="button" onClick={onOpenTasks}>
+            <CalendarClock size={20} />
+          </button>
+          <div>
+            <strong>{warmLead ? `Follow up with ${warmLead.businessName}` : "Open the follow-up queue"}</strong>
+            <p>{tasks.find((task) => task.status === "open")?.notes || "No open task. Add new leads from SuperSearch."}</p>
+          </div>
+          <button className="ghost-button" type="button" onClick={onOpenTasks}>
+            Open tasks
+          </button>
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function AgentsScreen({ leads, onRunAgent }: { leads: Lead[]; onRunAgent: () => void }) {
+  const agentRows = [
+    ["Website audit agent", "Find weak hero sections, missing CTAs, no booking flow", leads.filter((lead) => Boolean(lead.website)).length],
+    ["Instagram opener agent", "Draft short first-touch DMs for missing leads", leads.filter((lead) => lead.status === "missing").length],
+    ["Follow-up agent", "Prepare value follow-ups for warm conversations", leads.filter((lead) => lead.status === "follow_up").length]
+  ] as const;
+  return (
+    <section className="screen">
+      <Panel title="AI Sales Agents" action="Manual approval only">
+        <div className="data-table agent-table">
+          <div className="table-row table-head">
+            <span>Agent</span>
+            <span>Job</span>
+            <span>Queue</span>
+            <span>Action</span>
+          </div>
+          {agentRows.map(([name, job, queue]) => (
+            <div className="table-row" key={name}>
+              <span className="strong-cell with-icon">
+                <Bot size={18} />
+                {name}
+              </span>
+              <span>{job}</span>
+              <span className="blue-number">{queue}</span>
+              <span>
+                <button className="ghost-button" type="button" onClick={onRunAgent}>
+                  Draft
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function CrmPipelineScreen({ leads, onOpenLead }: { leads: Lead[]; onOpenLead: (leadId: string) => void }) {
+  const pipeline: LeadStatus[] = ["missing", "contacted", "follow_up", "interested", "meeting_booked", "won"];
+  return (
+    <section className="screen">
+      <div className="pipeline-board">
+        {pipeline.map((status) => (
+          <div className="pipeline-column" key={status}>
+            <div className="panel-heading">
+              <h2>{statusLabels[status]}</h2>
+              <span>{leads.filter((lead) => lead.status === status).length}</span>
+            </div>
+            {leads
+              .filter((lead) => lead.status === status)
+              .map((lead) => (
+                <button className="pipeline-card" key={lead.id} onClick={() => onOpenLead(lead.id)}>
+                  <strong>{lead.businessName}</strong>
+                  <span>{lead.niche} · {lead.location}</span>
+                  <small>{lead.instagramHandle || lead.email || "missing channel"}</small>
+                </button>
+              ))}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WebsiteVisitorsScreen({ leads, onConvert }: { leads: Lead[]; onConvert: () => void }) {
+  const visitors = leads.filter((lead) => lead.website).slice(0, 6);
+  return (
+    <section className="screen">
+      <Panel title="Website visitors" action="simulated from tracked leads">
+        <div className="data-table visitor-table">
+          <div className="table-row table-head">
+            <span>Business</span>
+            <span>Page signal</span>
+            <span>Intent</span>
+            <span>Action</span>
+          </div>
+          {visitors.map((lead, index) => (
+            <div className="table-row" key={lead.id}>
+              <span className="strong-cell">{lead.businessName}</span>
+              <span>{index % 2 ? "Pricing / care plan" : "Homepage / CTA audit"}</span>
+              <span>
+                <StatusPill status={index % 2 ? "interested" : "contacted"} label={index % 2 ? "high" : "medium"} />
+              </span>
+              <span>
+                <button className="ghost-button" type="button" onClick={onConvert}>
+                  Convert to lead
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function InboxPlacementScreen({ channels, onRunTest }: { channels: ChannelAccount[]; onRunTest: () => void }) {
+  return (
+    <section className="screen">
+      <div className="empty-state placement-state">
+        <LayoutDashboard size={46} />
+        <h3>Add a new test to get started</h3>
+        <p>Track whether outbound accounts are healthy before running larger manual batches.</p>
+        <button className="primary-button" type="button" onClick={onRunTest}>
+          <Plus size={16} />
+          Add New
+        </button>
+      </div>
+      <Panel title="Account readiness">
+        <div className="event-grid">
+          {channels.map((channel) => (
+            <div className="event-card" key={channel.id}>
+              <span>{channelIcon(channel.type)}</span>
+              <strong>{channel.account}</strong>
+              <p>{channel.notes}</p>
+              <time>{channel.healthScore}% health score</time>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function AutomationsScreen({ campaigns, onCreateFlow }: { campaigns: Campaign[]; onCreateFlow: () => void }) {
+  return (
+    <section className="screen">
+      <Panel title="Manual salesflows" action="no auto-send">
+        <div className="campaign-grid automation-grid">
+          {campaigns.map((campaign) => (
+            <article className="campaign-panel" key={campaign.id}>
+              <div className="campaign-top">
+                <div>
+                  <p className="eyeline">{campaign.niche}</p>
+                  <h2>{campaign.name}</h2>
+                </div>
+                <Workflow size={22} />
+              </div>
+              <div className="location-list">
+                {["First DM", "Value follow-up", "Meeting ask"].map((step) => (
+                  <span key={step}>{step}</span>
+                ))}
+              </div>
+              <button className="ghost-button full" type="button" onClick={onCreateFlow}>
+                Build checklist
+              </button>
+            </article>
+          ))}
         </div>
       </Panel>
     </section>
@@ -1276,6 +1651,20 @@ function FilterStack({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+type SidebarItem = {
+  label: string;
+  active?: boolean;
+  count?: number;
+  tone?: string;
+  status?: LeadStatus | "all";
+  view?: ViewKey;
+};
+
+type SidebarGroup = {
+  title: string;
+  items: SidebarItem[];
+};
+
 function sidebarConfig(
   activeView: ViewKey,
   analytics: Analytics,
@@ -1283,7 +1672,44 @@ function sidebarConfig(
   tasks: Task[],
   campaigns: Campaign[],
   channelAccounts: ChannelAccount[]
-) {
+) : { title: string; groups: SidebarGroup[] } {
+  if (activeView === "copilot") {
+    return {
+      title: "Instantly Copilot",
+      groups: [
+        {
+          title: "",
+          items: [
+            { label: "New chat", active: true, count: analytics.followUpsDue, tone: "blue", view: "tasks" },
+            { label: "Memory", count: leads.length, tone: "green", view: "copilot" },
+            { label: "Tasks", count: tasks.filter((task) => task.status === "open").length, tone: "amber", view: "tasks" }
+          ]
+        },
+        {
+          title: "Recents",
+          items: [
+            { label: "Roofing follow-ups", count: leads.filter((lead) => lead.niche === "Roofing").length, tone: "blue", view: "leads" },
+            { label: "HVAC pricing replies", count: leads.filter((lead) => lead.niche === "HVAC").length, tone: "green", view: "inbox" }
+          ]
+        }
+      ]
+    };
+  }
+  if (activeView === "agents") {
+    return {
+      title: "AI Sales Agents",
+      groups: [
+        {
+          title: "Agents",
+          items: [
+            { label: "Website audit", active: true, count: leads.filter((lead) => Boolean(lead.website)).length, tone: "blue" },
+            { label: "Instagram opener", count: leads.filter((lead) => lead.status === "missing").length, tone: "violet" },
+            { label: "Follow-up drafter", count: leads.filter((lead) => lead.status === "follow_up").length, tone: "amber" }
+          ]
+        }
+      ]
+    };
+  }
   if (activeView === "analytics") {
     return {
       title: "Analytics",
@@ -1298,9 +1724,9 @@ function sidebarConfig(
         {
           title: "Snapshot",
           items: [
-            { label: "Missing outreach", count: analytics.missingOutreach, tone: "red" },
-            { label: "Follow-ups due", count: analytics.followUpsDue, tone: "amber" },
-            { label: "Won", count: leads.filter((lead) => lead.status === "won").length, tone: "lime" }
+            { label: "Missing outreach", count: analytics.missingOutreach, tone: "red", status: "missing" },
+            { label: "Follow-ups due", count: analytics.followUpsDue, tone: "amber", view: "tasks" },
+            { label: "Won", count: leads.filter((lead) => lead.status === "won").length, tone: "lime", status: "won" }
           ]
         }
       ]
@@ -1331,22 +1757,23 @@ function sidebarConfig(
   }
   if (activeView === "inbox") {
     return {
-      title: "CRM",
+      title: "Unibox",
       groups: [
         {
-          title: "",
+          title: "Status",
           items: [
-            { label: "Inbox", active: true, count: leads.filter((lead) => lead.status !== "lost" && lead.status !== "won").length, tone: "blue" },
-            { label: "Done", count: leads.filter((lead) => lead.status === "won").length, tone: "lime" },
-            { label: "Upcoming", count: tasks.filter((task) => task.status === "open").length, tone: "amber" }
+            { label: "Lead", active: true, count: leads.filter((lead) => lead.status === "missing").length, tone: "blue", status: "missing" },
+            { label: "Interested", count: leads.filter((lead) => lead.status === "interested").length, tone: "green", status: "interested" },
+            { label: "Meeting booked", count: leads.filter((lead) => lead.status === "meeting_booked").length, tone: "violet", status: "meeting_booked" },
+            { label: "Won", count: leads.filter((lead) => lead.status === "won").length, tone: "lime", status: "won" }
           ]
         },
         {
           title: "Opportunities",
           items: [
-            { label: "All Leads", count: leads.length, tone: "blue" },
-            { label: "Interested", count: leads.filter((lead) => lead.status === "interested").length, tone: "green" },
-            { label: "Meeting booked", count: leads.filter((lead) => lead.status === "meeting_booked").length, tone: "violet" }
+            { label: "All Leads", count: leads.length, tone: "blue", status: "all" },
+            { label: "Campaigns", count: campaigns.length, tone: "blue", view: "campaigns" },
+            { label: "AI Sales Agents", count: analytics.followUpsDue, tone: "amber", view: "agents" }
           ]
         },
         {
@@ -1385,6 +1812,67 @@ function sidebarConfig(
             label: channel.account,
             count: channel.sentToday,
             tone: channel.type === "instagram" ? "violet" : channel.type === "linkedin" ? "blue" : "green"
+          }))
+        }
+      ]
+    };
+  }
+  if (activeView === "crm") {
+    return {
+      title: "CRM",
+      groups: [
+        {
+          title: "Pipeline",
+          items: [
+            { label: "All Leads", active: true, count: leads.length, tone: "blue", status: "all" },
+            { label: "Interested", count: leads.filter((lead) => lead.status === "interested").length, tone: "green", status: "interested" },
+            { label: "Meeting booked", count: leads.filter((lead) => lead.status === "meeting_booked").length, tone: "violet", status: "meeting_booked" },
+            { label: "Won", count: leads.filter((lead) => lead.status === "won").length, tone: "lime", status: "won" }
+          ]
+        }
+      ]
+    };
+  }
+  if (activeView === "visitors") {
+    return {
+      title: "Website Visitors",
+      groups: [
+        {
+          title: "Signals",
+          items: [
+            { label: "Pricing visits", active: true, count: leads.filter((lead) => Boolean(lead.website)).length, tone: "green" },
+            { label: "Missing CTA", count: leads.filter((lead) => !lead.website).length, tone: "amber", status: "missing" }
+          ]
+        }
+      ]
+    };
+  }
+  if (activeView === "placement") {
+    return {
+      title: "Inbox Placement",
+      groups: [
+        {
+          title: "Tests",
+          items: channelAccounts.map((channel) => ({
+            label: channel.account,
+            count: channel.healthScore,
+            tone: channel.healthScore > 90 ? "green" : "amber"
+          }))
+        }
+      ]
+    };
+  }
+  if (activeView === "automations") {
+    return {
+      title: "Automations",
+      groups: [
+        {
+          title: "Salesflows",
+          items: campaigns.map((campaign) => ({
+            label: campaign.name,
+            count: campaign.leadIds.length,
+            tone: campaign.niche === "Roofing" ? "blue" : "green",
+            view: "campaigns" as ViewKey
           }))
         }
       ]

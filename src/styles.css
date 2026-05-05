@@ -223,15 +223,20 @@ a {
 
 .sidebar-item {
   display: grid;
+  width: 100%;
   min-height: 44px;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+  border: 0;
   border-radius: 10px;
+  background: transparent;
   padding: 0 12px;
   color: var(--muted);
   font-size: 15px;
   font-weight: 750;
+  text-align: left;
+  cursor: pointer;
 }
 
 .sidebar-item.active,
@@ -1353,6 +1358,111 @@ input::placeholder {
   margin: 5px 0 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.copilot-hero {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #151a1a;
+  padding: 28px;
+}
+
+.copilot-hero > svg,
+.copilot-card svg {
+  color: var(--blue);
+}
+
+.copilot-hero h2 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
+.copilot-hero p,
+.copilot-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.copilot-card {
+  display: grid;
+  min-height: 210px;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  padding: 22px;
+  text-align: center;
+}
+
+.copilot-card strong {
+  color: var(--text);
+  font-size: 20px;
+}
+
+.agent-table .table-row {
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.4fr) minmax(90px, 0.4fr) minmax(110px, 0.4fr);
+}
+
+.pipeline-board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(190px, 1fr));
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pipeline-column {
+  min-height: 560px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #151a1a;
+}
+
+.pipeline-card {
+  display: grid;
+  width: calc(100% - 24px);
+  gap: 8px;
+  margin: 0 12px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #121717;
+  color: var(--muted);
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pipeline-card:hover {
+  border-color: #354458;
+  background: #182020;
+}
+
+.pipeline-card strong {
+  color: var(--text);
+}
+
+.pipeline-card small {
+  color: var(--blue);
+  font-weight: 760;
+}
+
+.visitor-table .table-row {
+  grid-template-columns: minmax(200px, 1fr) minmax(180px, 0.8fr) minmax(120px, 0.5fr) minmax(160px, 0.5fr);
+}
+
+.placement-state {
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #151a1a;
+}
+
+.automation-grid {
+  padding: 0 20px 20px;
 }
 
 .pulse {
