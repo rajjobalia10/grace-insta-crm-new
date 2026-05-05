@@ -222,7 +222,7 @@ function App() {
         channels={data.channels}
       />
       <main className="workspace">
-        <Topbar notice={notice} loading={loading} />
+        <Topbar notice={notice} loading={loading} onExportCsv={() => exportText("grace-insta-crm-leads.csv", leadsToCsv(activeLeads), "text/csv")} />
         <div className="workspace-body">
           {activeView === "analytics" && (
             <AnalyticsScreen
@@ -250,6 +250,7 @@ function App() {
               onSubmitLead={handleCreateLead}
               onCsvText={setCsvText}
               onCsvImport={handleCsvImport}
+              onExportJson={() => exportText("grace-insta-crm.json", JSON.stringify(data, null, 2), "application/json")}
               onStatusChange={handleStatusChange}
               onLogOutreach={handleLogOutreach}
               onSelectLead={(leadId) => {
@@ -382,7 +383,7 @@ function SectionSidebar({
   );
 }
 
-function Topbar({ notice, loading }: { notice: string; loading: boolean }) {
+function Topbar({ notice, loading, onExportCsv }: { notice: string; loading: boolean; onExportCsv: () => void }) {
   return (
     <header className="topbar">
       <div className="topbar-tabs">
@@ -400,10 +401,10 @@ function Topbar({ notice, loading }: { notice: string; loading: boolean }) {
           <CircleDot size={11} className={loading ? "pulse" : ""} />
           <span>{notice}</span>
         </div>
-        <a className="primary-button" href="/api/export/csv">
+        <button className="primary-button" type="button" onClick={onExportCsv}>
           <Download size={16} />
           Export CSV
-        </a>
+        </button>
         <button className="org-button">
           Grace Insta CRM
           <ChevronDown size={16} />
@@ -548,6 +549,7 @@ function LeadsScreen({
   onSubmitLead,
   onCsvText,
   onCsvImport,
+  onExportJson,
   onStatusChange,
   onLogOutreach,
   onSelectLead
@@ -567,6 +569,7 @@ function LeadsScreen({
   onSubmitLead: (event: FormEvent<HTMLFormElement>) => void;
   onCsvText: (value: string) => void;
   onCsvImport: () => void;
+  onExportJson: () => void;
   onStatusChange: (leadId: string, status: LeadStatus) => void;
   onLogOutreach: (leadId: string, channel?: ChannelType) => void;
   onSelectLead: (leadId: string) => void;
@@ -598,10 +601,10 @@ function LeadsScreen({
             <SearchBox value={query} onChange={onQuery} placeholder="Search businesses, cities, handles..." />
             <SelectPill value={statusFilter} onChange={onStatusFilter} options={["all", ...Object.keys(statusLabels)]} />
             <SelectPill value={channelFilter} onChange={onChannelFilter} options={["all", ...channels]} />
-            <a className="ghost-button" href="/api/export/json">
+            <button className="ghost-button" type="button" onClick={onExportJson}>
               <Download size={16} />
               JSON
-            </a>
+            </button>
           </div>
 
           <Panel title="SuperSearch leads" action={`${leads.length} visible`}>
@@ -1440,6 +1443,54 @@ function addDays(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function leadsToCsv(leads: Lead[]) {
+  const headers = [
+    "businessName",
+    "niche",
+    "location",
+    "website",
+    "instagramHandle",
+    "linkedinUrl",
+    "email",
+    "owner",
+    "source",
+    "status",
+    "tags",
+    "assignedUser",
+    "notes",
+    "setupFee",
+    "monthlyFee"
+  ];
+  return [
+    headers.join(","),
+    ...leads.map((lead) =>
+      headers
+        .map((header) => {
+          const value = lead[header as keyof Lead];
+          return csvEscape(Array.isArray(value) ? value.join("|") : value);
+        })
+        .join(",")
+    )
+  ].join("\n");
+}
+
+function csvEscape(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function exportText(filename: string, text: string, mimeType: string) {
+  const blob = new Blob([text], { type: `${mimeType};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export default App;
